@@ -14,7 +14,7 @@ class NoisyLinear(hk.Module):
   def __init__(
             self,
             output_size: int,
-            rng: jax.random.PRNGKey,
+            #rng: jax.random.PRNGKey,
             with_bias: bool = True,
             w_mu_init: Optional[hk.initializers.Initializer] = None,
             b_mu_init: Optional[hk.initializers.Initializer] = None,
@@ -34,7 +34,7 @@ class NoisyLinear(hk.Module):
       name: Name of the module.
     """
     super().__init__(name=name)
-    self.rng = hk.PRNGSequence(rng)
+    #self.rng = hk.PRNGSequence(rng)
     self.input_size = None
     self.output_size = output_size
     self.with_bias = with_bias
@@ -66,13 +66,13 @@ class NoisyLinear(hk.Module):
     w_sigma = hk.get_parameter("w_sigma", [input_size, output_size], dtype, init=w_sigma_init)
 
     if self.factorized:
-        e_noise_input = jax.random.normal(next(self.rng), (w_sigma.shape[0], 1))
-        e_noise_output = jax.random.normal(next(self.rng), (1, w_sigma.shape[1]))
+        e_noise_input = jax.random.normal(hk.next_rng_key(), (w_sigma.shape[0], 1))
+        e_noise_output = jax.random.normal(hk.next_rng_key(), (1, w_sigma.shape[1]))
         e_noise_input = jnp.multiply(jnp.sign(e_noise_input), jnp.sqrt(jnp.abs(e_noise_input)))
         e_noise_output = jnp.multiply(jnp.sign(e_noise_output), jnp.sqrt(jnp.abs(e_noise_output)))
         w_noise = jnp.matmul(e_noise_input, e_noise_output)
     else:
-        w_noise = jax.random.normal(next(self.rng), w_sigma.shape)
+        w_noise = jax.random.normal(hk.next_rng_key(), w_sigma.shape)
     
     out_noisy = jnp.dot(inputs, jnp.add(w_mu, jnp.multiply(w_sigma, w_noise)))
 
@@ -81,7 +81,7 @@ class NoisyLinear(hk.Module):
       b_sigma = hk.get_parameter("b_sigma", [self.output_size], dtype, init=self.b_sigma_init)
       b_mu = jnp.broadcast_to(b_mu, out_noisy.shape)
       b_sigma = jnp.broadcast_to(b_sigma, out_noisy.shape)
-      b_noise = e_noise_output if self.factorized else jax.random.normal(next(self.rng), b_sigma.shape)
+      b_noise = e_noise_output if self.factorized else jax.random.normal(hk.next_rng_key(), b_sigma.shape)
       out_noisy = out_noisy + jnp.add(b_mu, jnp.multiply(b_sigma, b_noise))
       
     return out_noisy
@@ -119,7 +119,7 @@ class NoisyMLP(hk.Module):
       ValueError: If with_bias is False and b_init is not None.
     """
 
-    self.rng = jax.random.PRNGKey(seed)
+    #self.rng = jax.random.PRNGKey(seed)
     super().__init__(name=name)
     self.with_bias = with_bias
     self.w_mu_init = w_mu_init
@@ -131,10 +131,10 @@ class NoisyMLP(hk.Module):
     self.factorized = factorized_noise
     layers = []
     for index, output_size in enumerate(output_sizes):
-      key, self.rng = jax.random.split(self.rng)
+      #key, self.rng = jax.random.split(self.rng)
       layers.append(NoisyLinear(
                               output_size=output_size,
-                              rng=key,
+                              #rng=key,
                               w_mu_init=w_mu_init,
                               b_mu_init=b_mu_init,
                               w_sigma_init=w_sigma_init,
@@ -219,5 +219,5 @@ class NoisyMLP(hk.Module):
         activation=self.activation,
         activate_final=activate_final,
         name=name,
-        seed=self.seed,
+        #seed=self.seed,
         factorized_noise=self.factorized)
