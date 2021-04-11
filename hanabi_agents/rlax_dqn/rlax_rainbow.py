@@ -305,6 +305,7 @@ class DQNAgent:
         self.rng = hk.PRNGSequence(jax.random.PRNGKey(params.seed))
         self.n_network = params.n_network
         # for evaluating absolute td errors near start of training
+        self.td_buffer = []
         self.drawn_td_abs = [[] for _ in range(self.n_network)]
         self.drawn_transitions = []
         self.random_transitions = []
@@ -428,7 +429,7 @@ class DQNAgent:
         actions_tm1 = actions_tm1.reshape(self.n_network, -1, 1)
         rewards_t = rewards_t.reshape(self.n_network, -1, 1)
         term_t = term_t.reshape(self.n_network, -1, 1)
-        
+        self.update_priority_buffer()
         self.buffer.add(obs_vec_tm1, actions_tm1, rewards_t, obs_vec_t, term_t)
         
     def shape_rewards(self, observations, moves):
@@ -470,7 +471,10 @@ class DQNAgent:
                         
             if self.params.use_priority:
                 
-                tds_abs = jax.tree_util.tree_map(onp.array, tds)
+                self.td_buffer.append({'index': sample_indices, 'td': tds})
+                print(len(self.td_buffer))
+                
+#                 tds_abs = jax.tree_util.tree_map(onp.array, tds)
                 if self.store_td:
                     random_transitions = self.buffer.sample_random(self.params.train_batch_size)[0]
                     del transitions['observation_tm1']
@@ -479,15 +483,26 @@ class DQNAgent:
                     del random_transitions['observation_t']
                     self.drawn_transitions.append(transitions)
                     self.random_transitions.append(random_transitions)
-                    for i, td in enumerate(tds_abs):
-                        self.drawn_td_abs[i].extend(td)
-                self.buffer.update_priorities(sample_indices, tds_abs)
+#                     for i, td in enumerate(tds_abs):
+#                         self.drawn_td_abs[i].extend(td)
+#                 self.buffer.update_priorities(sample_indices, tds_abs)
 
             if self.train_step % self.params.target_update_period == 0:
                 self.trg_params = self.online_params
     
             self.train_step += 1
+            
+    def update_priority_buffer(self):
         
+        if self.params.use_priority and len(self.td_buffer)>0:
+            for item in self.td_buffer:
+                tds_abs = jax.tree_util.tree_map(onp.array, item['td'])
+                if self.store_td:
+                    for i, td in enumerate(tds_abs):
+                        self.drawn_td_abs[i].extend(td)
+                self.buffer.update_priorities(item['index'], tds_abs)
+            self.td_buffer.clear()
+                
     def create_stacker(self, obs_len, n_states):
         return VectorizedObservationStacker(self.params.history_size, 
                                             obs_len,
@@ -506,6 +521,7 @@ class DQNAgent:
             pickle.dump(self.trg_params, of)
             
         if not only_weights:
+            self.update_priority_buffer()
             with open(join_path(path, "rlax_rainbow_" + fname_part + "_opt_state.pkl"), 'wb') as of:
                 pickle.dump(jax.tree_util.tree_map(onp.array, self.opt_state), of)
             with open(join_path(path, "rlax_rainbow_" + fname_part + "_experience.pkl"), 'wb') as of:
@@ -541,6 +557,7 @@ class DQNAgent:
                     self.buffer[i].load(serialized)
                 
     def get_buffer_tds(self):
+        self.update_priority_buffer()
         if self.params.use_priority:
             index_list = range(self.buffer.size)
             return self.buffer.get_tds(index_list)
@@ -548,6 +565,7 @@ class DQNAgent:
             return None
          
     def get_drawn_tds(self, reset=True, deactivate=True):
+        self.update_priority_buffer()
         tds = onp.array(self.drawn_td_abs)
         transitions = copy.deepcopy(self.drawn_transitions)
         random_transitions = copy.deepcopy(self.random_transitions)
