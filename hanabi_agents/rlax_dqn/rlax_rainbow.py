@@ -472,7 +472,6 @@ class DQNAgent:
             if self.params.use_priority:
                 
                 self.td_buffer.append({'index': sample_indices, 'td': tds})
-                print(len(self.td_buffer))
                 
 #                 tds_abs = jax.tree_util.tree_map(onp.array, tds)
                 if self.store_td:
