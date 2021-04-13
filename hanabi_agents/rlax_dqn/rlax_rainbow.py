@@ -21,7 +21,7 @@ from .experience_buffer import ExperienceBuffer, sample_from_buffer
 from .priority_buffer import PriorityBuffer
 from .noisy_mlp import NoisyMLP
 from .noisy_mlp2 import NoisyMLP2
-from .mlp.py import MLP
+from .mlp import MLP
 from .params import RlaxRainbowParams
 from .vectorized_stacker import VectorizedObservationStacker
 
@@ -559,8 +559,7 @@ class DQNAgent:
         # experience buffer
         if experience_file is not None:
             with open(experience_file, 'rb') as iwf:
-                for i, serialized in enumerate(pickle.load(iwf)):
-                    self.buffer[i].load(serialized)
+                self.buffer[i].load(pickle.load(iwf))
                 
     def get_buffer_tds(self):
         self.update_priority_buffer()
