@@ -55,7 +55,10 @@ class DQNPolicy:
     @staticmethod
     def _apply_legal_boltzmann(probs, tau, legal):
         """Mix an arbitrary categorical distribution with a boltzmann distribution"""
-        boltzmann_probs = jnp.where(legal, jnp.exp(probs / tau), 0.)
+        weighted_probs = probs / tau
+        boltzmann_probs = jnp.where(
+            legal, jnp.exp(weighted_probs - jnp.max(weighted_probs, axis=-1)[:, None]), 0.
+        )
         boltzmann_probs = boltzmann_probs / jnp.sum(boltzmann_probs, axis=-1)[:, None]
         return boltzmann_probs
 
@@ -309,7 +312,10 @@ class DQNLearning:
 
             # importance sampling
             mean_loss = jnp.mean(batch_loss * weights_is)
-            new_prios = jnp.abs(batch_loss)
+            if use_distribution:
+                new_prios = jnp.abs(batch_loss)
+            else: 
+                new_prios = jnp.sqrt(batch_loss)
             return mean_loss, new_prios
 
 
