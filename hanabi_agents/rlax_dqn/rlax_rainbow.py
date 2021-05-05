@@ -21,7 +21,7 @@ from .experience_buffer import ExperienceBuffer, sample_from_buffer
 from .priority_buffer import PriorityBuffer
 from .noisy_mlp import NoisyMLP
 from .noisy_mlp2 import NoisyMLP2
-from .mlp import MLP
+#from .mlp import MLP
 from .params import RlaxRainbowParams
 from .vectorized_stacker import VectorizedObservationStacker
 
@@ -376,7 +376,7 @@ class DQNAgent:
                 if use_noisy_network:
                     network = NoisyMLP(layers_, factorized_noise=self.params.factorized_noise) 
                 else:
-                    network = MLP(layers_)
+                    network = hk.nets.MLP(layers_)
                 return hk.Reshape(output_shape=output_shape)(network(obs))
 
             return hk.transform(q_net)
