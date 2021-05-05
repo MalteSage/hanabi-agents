@@ -599,7 +599,7 @@ class DQNAgent:
         if opt_state_file is not None:
             with open(opt_state_file, 'rb') as iwf:
                 self.opt_state = pickle.load(iwf)
-            self.train_step = onp.asscalar(self.opt_state[0].count)
+            self.train_step = self.opt_state[0].count[0]
         # experience buffer
         if experience_file is not None:
             with open(experience_file, 'rb') as iwf:
