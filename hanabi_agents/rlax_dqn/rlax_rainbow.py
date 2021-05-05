@@ -603,7 +603,7 @@ class DQNAgent:
         # experience buffer
         if experience_file is not None:
             with open(experience_file, 'rb') as iwf:
-                self.buffer[i].load(pickle.load(iwf))
+                self.buffer.load(pickle.load(iwf))
                 
     def get_buffer_tds(self):
         if self.params.use_priority:
