@@ -284,12 +284,17 @@ class DQNAgent:
         self.reward_shaper = reward_shaper
         self.rng = hk.PRNGSequence(jax.random.PRNGKey(params.seed))
 
-        # train 4 models in parallel
-        self.num_unique_parallel = 2
+        # train N models in parallel
+        self.num_unique_parallel = 1
         self.num_parallel = self.num_unique_parallel * len(lrs)
         self.lrs = lrs
         self.alpha = alphas
         self.buffersize = buffersizes
+        self.past_obs = onp.zeros((self.params.past_obs_size, observation_spec.shape[1]))
+        # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        self.past_lms = onp.zeros((self.params.past_obs_size, action_spec.num_values))
+        # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
         # Build and initialize Q-network.
         def build_network(
                 layers: List[int],
@@ -307,6 +312,9 @@ class DQNAgent:
         rng_init = jnp.asarray([next(self.rng) for i in range(self.num_parallel)])
         parallel_params = jax.vmap(self.network.init, in_axes=(0, None))
         self.trg_params = parallel_params(rng_init, onp.zeros((observation_spec.shape[0], observation_spec.shape[1] * self.params.history_size), dtype = onp.float16))
+
+
+
 
         self.online_params = self.trg_params
         self.atoms = jnp.tile(jnp.linspace(-params.atom_vmax, params.atom_vmax, params.n_atoms),
@@ -373,8 +381,16 @@ class DQNAgent:
         self.parttime_update_1 = 0
         self.max_i = 0
 
-    def exploit(self, observations):
+    def exploit(self, observations, eval = False):
         # start_time = time.time()
+        if eval == False:
+            # print(self.past_obs.shape)
+            self.past_obs = onp.roll(self.past_obs, -int(observations[1][0].shape[0]), axis=0)
+            self.past_obs[-int(observations[1][0].shape[0]):, :] = observations[1][0]
+            self.past_lms = onp.roll(self.past_lms, -int(observations[1][1].shape[0]), axis=0)
+            self.past_lms[-int(observations[1][1].shape[0]):, :] = observations[1][1]
+
+        # print(observations[1][0].shape)
         obs_len = int(observations[1][0].shape[0]/self.num_parallel)
         observations_ = observations[1][0].reshape(self.num_parallel, obs_len, -1)
         legal_actions = observations[1][1].reshape(self.num_parallel, obs_len, -1)
@@ -385,9 +401,15 @@ class DQNAgent:
             key_rng, observations_, legal_actions)
         actions = onp.concatenate(onp.asarray(actions), axis = None)
         return jax.tree_util.tree_map(onp.array, actions)
+        
 
     def explore(self, observations):
         # start_time = time.time()
+        self.past_obs = onp.roll(self.past_obs, -int(observations[1][0].shape[0]), axis=0)
+        self.past_obs[-int(observations[1][0].shape[0]):, :] = observations[1][0]
+        self.past_lms = onp.roll(self.past_lms, -int(observations[1][1].shape[0]), axis=0)
+        self.past_lms[-int(observations[1][1].shape[0]):, :] = observations[1][1]
+
         obs_len = int(observations[1][0].shape[0]/self.num_parallel)
         observations_ = observations[1][0].reshape(self.num_parallel, obs_len, -1)
         legal_actions = observations[1][1].reshape(self.num_parallel, obs_len, -1)
@@ -449,17 +471,6 @@ class DQNAgent:
                 prios.append(_prio)
                 c.append(_tra._asdict())
 
-            # futures = []
-            # with concurrent.futures.ThreadPoolExecutor() as executor:
-            #     for i in range(self.num_parallel):
-            #         futures.append(executor.submit(self.experience[i].sample_batch, self.params.train_batch_size))
-
-            # return_value = [i.result() for i in futures]
-            # for _a, _b, _c in return_value:
-
-            #     sample_indices.append(_a)
-            #     prios.extend(_b)
-            #     c.append(_c._asdict())
             prios = onp.asarray(prios).reshape(self.num_parallel, self.params.train_batch_size)
 
             transitions = {}
@@ -503,36 +514,17 @@ class DQNAgent:
         if self.params.use_priority:
             self.intermediate_indices.append(sample_indices)
             self.intermediate_tds.append(tds)
-            # for i, buffer in enumerate(self.experience):
-                
-            #     indices_sampled = sample_indices[i]
-                
-                
-                # tds_abs = onp.abs(tds)[i]
-                # tds_abs = tds[i]
-                # print(tds_abs)
-                
-
-                # buffer.update_priorities(indices_sampled, tds_abs)
-
-            # with concurrent.futures.ThreadPoolExecutor() as executor:
-                
-            #     executor.map(self.experience, sample_indices,  onp.abs(tds))
-
-                # with concurrent.futures.ThreadPoolExecutor() as executor:
-                #     for i in range(self.num_parallel):
-                #         executor.submit(self.experience[i].update_priorities, sample_indices[i], onp.abs(tds[i]))
-                        
+    
                    
         self.total_prio_update += start_time-time.time()
 
         if self.train_step % self.params.target_update_period == 0:
             self.trg_params = self.online_params
             # print('add_exp took {:.2f} seconds'.format(self.total_add_time))
-            print('PrioUpdates took {:.2f}s'.format(self.total_prio_update))
-            print('Part_time_1 took {:.2f}s'.format(self.parttime_update_1), len(self.experience), self.num_parallel, self.num_unique_parallel)
+            # print('PrioUpdates took {:.2f}s'.format(self.total_prio_update))
+            # print('Part_time_1 took {:.2f}s'.format(self.parttime_update_1), len(self.experience), self.num_parallel, self.num_unique_parallel)
             
-            print(self.train_step)
+            # print(self.train_step)
         self.train_step += 1
 
     # additional function that splits update() in case of priority_buffer==True into two function
@@ -554,14 +546,14 @@ class DQNAgent:
             for i, buffer in enumerate(self.experience):
                 buffer.update_priorities(indices[i], tds_np[i])
 
-            print('Action hoch alpha took {:.2f}'.format(self.experience[0].hoch_alpha))
-            print('Update Values took {:.2f}'.format(self.experience[0].update_prios))
-            print('Total took {:.2f}'.format(self.experience[0].total_time))
+            # print('Action hoch alpha took {:.2f}'.format(self.experience[0].hoch_alpha))
+            # print('Update Values took {:.2f}'.format(self.experience[0].update_prios))
+            # print('Total took {:.2f}'.format(self.experience[0].total_time))
 
             self.intermediate_indices = self.intermediate_indices[-2:]
             self.intermediate_tds = self.intermediate_tds[-2:]
         else:
-            print('false')
+            # print('false')
             pass
 
 
@@ -586,6 +578,13 @@ class DQNAgent:
             pickle.dump(self.online_params, of)
         with open(join_path(path, "rlax_rainbow_" + fname_part +  "_target.pkl"), 'wb') as of:
             pickle.dump(self.trg_params, of)
+
+    def save_states(self, path, fname_part, save_attributes = True):
+        """Save online and target network weights to the specified path"""
+
+        with open(join_path(path, "rlax_rainbow_" + fname_part + "_online.pkl"), 'wb') as of:
+            pickle.dump(self.opt_state, of)
+
 
 
 

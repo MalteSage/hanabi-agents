@@ -330,7 +330,7 @@ class DQNAgent:
             shaped_rewards, shape_type = self.reward_shaper.shape(observations[0], 
                                                                   moves)
             return onp.array(shaped_rewards), onp.array(shape_type)
-        return (0, 0)
+        return (onp.zeros(observations[1][0].shape[0]), onp.zeros(observations[1][0].shape[0]))
 
     def update(self):
         # start_time=time.time()
@@ -388,6 +388,8 @@ class DQNAgent:
             pickle.dump(self.online_params, of)
         with open(join_path(path, "rlax_rainbow_" + fname_part + "_target.pkl"), 'wb') as of:
             pickle.dump(self.trg_params, of)
+        with open(join_path(path, "rlax_rainbow_" + fname_part + "_state.pkl"), 'wb') as of:
+            pickle.dump(self.opt_state, of)
 
     def restore_weights(self, online_weights_file, trg_weights_file):
         """Restore online and target network weights from the specified files"""
