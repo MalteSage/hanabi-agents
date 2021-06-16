@@ -8,11 +8,15 @@ class RlaxRainbowParams(NamedTuple):
     train_batch_size: int = 256
     target_update_period: int = 500
     discount: float = 0.99
+    use_boltzmann_exploration: bool = False
     epsilon: Union[Callable[[int], float], float] = lambda x: 0.0
+    tau: Union[Callable[[int], float], float] = lambda x: 0.1
     learning_rate: float = 6.25e-5
     layers: List[int] = [512, 512]
     use_double_q: bool = True
+    use_distribution: bool = True
     use_priority: bool = False
+    use_noisy_network: bool = True
     experience_buffer_size: int = 2**15
     seed: int = 1234
     n_atoms: int = 31
@@ -21,15 +25,27 @@ class RlaxRainbowParams(NamedTuple):
     priority_w: float = 0.6
     history_size: int = 1
     past_obs_size: int = 100000
-    
+    fixed_weights: bool = False
+    n_network: int = 1 # number of networks trained in parallel
+    factorized_noise: bool = False
+
 @gin.configurable
 class RewardShapingParams(NamedTuple):
-    
+
     # conservative agent
     use_reward_shaping: bool = True
-    min_play_probability: float = 0
-    w_play_probability: float = 0
+    min_play_probability: float = 0.8
+    w_play_penalty: Union[Callable[[int], float], float] = 0
+    m_play_penalty: float = 0
+    w_play_reward: Union[Callable[[int], float], float] = 0
+    m_play_reward: float = 0
+    w_play_probability: float = 0.1
+
     penalty_last_of_kind: float = 0
+
+@gin.configurable
+class AgentType(NamedTuple):
+    type: str = 'rainbow'
 
 @gin.configurable
 class PBTParams(NamedTuple):

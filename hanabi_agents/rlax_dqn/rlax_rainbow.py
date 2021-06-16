@@ -6,6 +6,8 @@ import pickle
 from functools import partial
 from typing import Tuple, List
 from os.path import join as join_path
+import timeit
+import copy
 
 import numpy as onp
 import random
@@ -89,6 +91,16 @@ class DQNPolicy:
         num_legal = jnp.sum(legal, axis=-1, keepdims=True)
         uniform_probs = legal / num_legal
         return (1 - epsilon) * probs + epsilon * uniform_probs
+    
+    @staticmethod
+    def _apply_legal_boltzmann(probs, tau, legal):
+        """Mix an arbitrary categorical distribution with a boltzmann distribution"""
+        weighted_probs = probs / tau
+        boltzmann_probs = jnp.where(
+            legal, jnp.exp(weighted_probs - jnp.max(weighted_probs, axis=-1)[:, None]), 0.
+        )
+        boltzmann_probs = boltzmann_probs / jnp.sum(boltzmann_probs, axis=-1)[:, None]
+        return boltzmann_probs
 
     @staticmethod
     def _argmax_with_random_tie_breaking(preferences):
@@ -126,15 +138,45 @@ class DQNPolicy:
             return -jnp.nansum(probs * jnp.log(probs), axis=-1)
 
         return DiscreteDistribution(sample_fn, probs_fn, logprob_fn, entropy_fn)
+    
+    @staticmethod
+    def legal_softmax(tau=None):
+        """An epsilon-greedy distribution with illegal probabilities set to zero"""
+
+        def sample_fn(key: chex.Array,
+                      preferences: chex.Array,
+                      legal: chex.Array,
+                      tau=tau):
+            probs = DQNPolicy._apply_legal_boltzmann(preferences, tau, legal)
+            return DQNPolicy._categorical_sample(key, probs)
+
+        def probs_fn(preferences: chex.Array, legal: chex.Array, tau=tau):
+            return DQNPolicy._apply_legal_boltzmann(preferences, tau, legal)
+
+        def logprob_fn(sample: chex.Array,
+                       preferences: chex.Array,
+                       legal: chex.Array,
+                       tau=tau):
+            probs = DQNPolicy._apply_legal_boltzmann(preferences, tau, legal)
+            return rlax.base.batched_index(jnp.log(probs), sample)
+
+        def entropy_fn(preferences: chex.Array, legal: chex.Array, tau=tau):
+            probs = DQNPolicy._apply_legal_boltzmann(preferences, tau, legal)
+            return -jnp.nansum(probs * jnp.log(probs), axis=-1)
+
+        return DiscreteDistribution(sample_fn, probs_fn, logprob_fn, entropy_fn)
 
 
     @staticmethod
-    @partial(jax.jit, static_argnums=(0))
+    @partial(jax.jit, static_argnums=(0, 1, 2))
     def policy(
             network,
+            use_distribution: bool,
+            use_softmax: bool,
             atoms,
             net_params,
             epsilon: float,
+            tau: float,
             key: float,
             obs: chex.Array,
             lms: chex.Array):
@@ -147,23 +189,34 @@ class DQNPolicy:
             obs        -- observation.
             lm         -- one-hot encoded legal actions
         """
-        # compute logits
-        logits = network.apply(net_params, None, obs)
-        # set logits for illegal actions to negative infinity
-        #  tiled_lms = jnp.broadcast_to(lms[:, :, onp.newaxis], logits.shape)
-        #  logits = jnp.where(tiled_lms, logits, -jnp.inf)
-        probs = jax.nn.softmax(logits, axis=-1)
-        q_vals = jnp.mean(probs * atoms, axis=-1)
+        # print('compile policy')
+        # compute q values
+        # calculate q value from distributional output
+        # by calculating mean of distribution
+        if use_distribution:
+            logits = network.apply(net_params, key, obs)
+            probs = jax.nn.softmax(logits, axis=-1)
+            q_vals = jnp.mean(probs * atoms, axis=-1)
+            
+        # q values equal network output
+        else:
+            q_vals = network.apply(net_params, key, obs)
+        
+        # mask q values of illegal actions
         q_vals = jnp.where(lms, q_vals, -jnp.inf)
 
         # compute actions
-        actions = DQNPolicy.legal_epsilon_greedy(epsilon=epsilon).sample(key, q_vals, lms)
+        if use_softmax:
+            actions = DQNPolicy.legal_softmax(tau=tau).sample(key, q_vals, lms)
+        else:
+            actions = DQNPolicy.legal_epsilon_greedy(epsilon=epsilon).sample(key, q_vals, lms)
         return q_vals, actions
 
     @staticmethod
-    @partial(jax.jit, static_argnums=(0))
+    @partial(jax.jit, static_argnums=(0, 1))
     def eval_policy(
             network,
+            use_distribution: bool,
             atoms,
             net_params,
             key,
@@ -177,22 +230,32 @@ class DQNPolicy:
             obs        -- observation.
             lm         -- one-hot encoded legal actions
         """
-        # compute logits and convert those to q_vals
-        logits = network.apply(net_params, None, obs)
-        probs = jax.nn.softmax(logits, axis=-1)
-        q_vals = jnp.mean(probs * atoms, axis=-1)
+        # compute q values
+        # calculate q value from distributional output
+        # by calculating mean of distribution
+        if use_distribution:
+            logits = network.apply(net_params, key, obs)
+            probs = jax.nn.softmax(logits, axis=-1)
+            q_vals = jnp.mean(probs * atoms, axis=-1)
+            
+        # q values equal network output
+        else:
+            q_vals = network.apply(net_params, key, obs)
+        
+        # mask q values of illegal actions
         q_vals = jnp.where(lms, q_vals, -jnp.inf)
 
-        # compute actions
+        # select best action
+        # return rlax.greedy().sample(key, q_vals), jnp.max(q_vals, axis=1)
         return rlax.greedy().sample(key, q_vals)
-
 class DQNLearning:
+    
     @staticmethod
-    @partial(jax.jit, static_argnums=(0, 2))
-    def update_q(network, atoms, optimizer, lr, online_params, trg_params, opt_state,
-                 transitions, discount_t, prios, beta_is):
+    @partial(jax.jit, static_argnums=(0, 2, 11, 12))
+    def update_q(network, atoms, optimizer, lr, online_params, trg_params, opt_state, 
+                 transitions, discount_t, prios, beta_is, use_double_q, use_distribution, 
+                 key_online, key_target, key_selector): 
         """Update network weights wrt Q-learning loss.
-
         Args:
             network    -- haiku Transformed network.
             optimizer  -- optimizer.
@@ -205,16 +268,12 @@ class DQNLearning:
             term_t     -- terminal state at time t?
         """
 
-        def categorical_double_q_td(online_params, trg_params, obs_tm1, a_tm1, r_t, obs_t, lm_t, term_t, discount_t):
-            q_logits_tm1 = network.apply(online_params, None, obs_tm1)
-            q_logits_t = network.apply(trg_params, None, obs_t)
-            q_logits_sel = network.apply(online_params, None, obs_t)
+        # calculate double q td loss for distributional network
+        def categorical_double_q_td(online_params, trg_params, obs_tm1, a_tm1, r_t, obs_t, term_t, discount_t):
+            q_logits_tm1 = network.apply(online_params, key_online, obs_tm1)
+            q_logits_t = network.apply(trg_params, key_target, obs_t)
+            q_logits_sel = network.apply(online_params, key_selector, obs_t)
             q_sel = jnp.mean(jax.nn.softmax(q_logits_sel, axis=-1) * atoms, axis=-1)
-            # set q values of illegal actions to a large negative number.
-            #  q_sel = jnp.where(lm_t, q_sel, -1e2)
-            #  q_t = jnp.where(lm_t, q_t, -1e3)
-            # set q values to zero if the state is terminal, i.e.
-            #  q_t = jnp.where(jnp.broadcast_to(term_t, q_t.shape), 0.0, q_t)
             
             # set discount to zero if state terminal
             term_t = term_t.reshape(r_t.shape)
@@ -224,19 +283,77 @@ class DQNLearning:
                                    in_axes=(None, 0, 0, 0, 0, None, 0, 0,))
             td_errors = batch_error(atoms[0], q_logits_tm1, a_tm1, r_t, discount_t, atoms[0], q_logits_t, q_sel)
             return td_errors
+        
+        # calculate q td loss for distributional network
+        def categorical_q_td(online_params, trg_params, obs_tm1, a_tm1, r_t, obs_t, term_t, discount_t):
+            
+            q_logits_tm1 = network.apply(online_params, key_online, obs_tm1)
+            q_logits_t = network.apply(trg_params, key_target, obs_t)
+            
+            # set discount to zero if state terminal
+            term_t = term_t.reshape(r_t.shape)
+            discount_t = jnp.where(term_t, 0, discount_t)
+            
+            batch_error = jax.vmap(rlax.categorical_q_learning,
+                                   in_axes=(None, 0, 0, 0, 0, None, 0,))
+            
+            td_errors = batch_error(atoms[0], q_logits_tm1, a_tm1, r_t, discount_t, atoms[0], q_logits_t)
+            return td_errors
+        
+        # calculate double q td loss (no distributional output)
+        def double_q_td(online_params, trg_params, obs_tm1, a_tm1, r_t, obs_t, term_t, discount_t):
+            
+            q_tm1 = network.apply(online_params, key_online, obs_tm1)
+            q_t = network.apply(trg_params, key_target, obs_t)
+            q_t_selector = network.apply(online_params, key_selector, obs_t)
+            
+            # set discount to zero if state terminal
+            term_t = term_t.reshape(r_t.shape)
+            discount_t = jnp.where(term_t, 0, discount_t)
+            
+            batch_error = jax.vmap(rlax.double_q_learning,
+                                   in_axes=(0, 0, 0, 0, 0, 0))
+            
+            td_errors = batch_error(q_tm1, a_tm1, r_t, discount_t, q_t, q_t_selector)
+            return td_errors**2
+        
+         # calculate q td loss (no distributional output)
+        def q_td(online_params, trg_params, obs_tm1, a_tm1, r_t, obs_t, term_t, discount_t):
+            
+            q_tm1 = network.apply(online_params, key_online, obs_tm1)
+            q_t = network.apply(trg_params, key_target, obs_t)
+            
+            # set discount to zero if state terminal
+            term_t = term_t.reshape(r_t.shape)
+            discount_t = jnp.where(term_t, 0, discount_t)
+            
+            batch_error = jax.vmap(rlax.q_learning,
+                                   in_axes=(0, 0, 0, 0, 0,))
+            
+            td_errors = batch_error(q_tm1, a_tm1, r_t, discount_t, q_t)
+            return td_errors**2
 
-        def loss(online_params, trg_params, obs_tm1, a_tm1, r_t, obs_t, lm_t, term_t, discount_t, prios):
+        def loss(online_params, trg_params, obs_tm1, a_tm1, r_t, obs_t, term_t, discount_t, prios):
+            
+            # importance sampling
             weights_is = (1. / prios).astype(jnp.float32) ** beta_is
             weights_is /= jnp.max(weights_is)
 
-            batch_loss = categorical_double_q_td(
-                online_params, trg_params, obs_tm1, a_tm1, r_t, obs_t, lm_t,
-                term_t, discount_t)
+            # select the loss calculation function (either for double q learning or q learning)
+            if use_distribution:
+                q_loss_td = categorical_double_q_td if use_double_q else categorical_q_td
+            else:
+                q_loss_td = double_q_td if use_double_q else q_td
+            batch_loss = q_loss_td(
+                online_params, trg_params, obs_tm1, a_tm1, r_t, obs_t, term_t, discount_t
+            )
 
-            #  batch_loss = rlax.huber_loss(td_errors, 1.)
+            # importance sampling
             mean_loss = jnp.mean(batch_loss * weights_is)
-
-            new_prios = jnp.abs(batch_loss)
+            if use_distribution:
+                new_prios = jnp.abs(batch_loss)
+            else: 
+                new_prios = jnp.sqrt(batch_loss)
             return mean_loss, new_prios
 
 
@@ -244,14 +361,14 @@ class DQNLearning:
         # grad_fn_parallel = jax.vmap(grad_fn, in_axes=(0, 0, None, None, None, None, None, None, None, None))
         grads, new_prios = grad_fn(
             online_params, trg_params,
-            transitions['observation_tm1'],
-            transitions['action_tm1'][:, 0],
-            transitions['reward_t'][:, 0],
-            transitions['observation_t'],
-            transitions['legal_moves_t'],
-            transitions['terminal_t'],
+            transitions["observation_tm1"],
+            transitions["action_tm1"][:, 0],
+            transitions["reward_t"][:, 0],
+            transitions["observation_t"],
+            transitions["terminal_t"],
             discount_t,
-            prios)
+            prios
+        )
 
         updates, opt_state_t = optimizer.update(grads, opt_state)
         updates = apply_lr(lr, updates, opt_state)
@@ -277,9 +394,13 @@ class DQNAgent:
         if not callable(params.epsilon):
             eps = params.epsilon
             params = params._replace(epsilon=lambda ts: eps)
+        if not callable(params.tau):
+            tau = params.tau
+            params = params._replace(tau=lambda ts: tau)
         if not callable(params.beta_is):
             beta = params.beta_is
             params = params._replace(beta_is=lambda ts: beta)
+
         self.params = params
         self.reward_shaper = reward_shaper
         self.rng = hk.PRNGSequence(jax.random.PRNGKey(params.seed))
@@ -287,6 +408,13 @@ class DQNAgent:
         # train N models in parallel
         self.num_unique_parallel = 1
         self.num_parallel = self.num_unique_parallel * len(lrs)
+        #..
+        self.n_network = self.num_parallel
+        self.drawn_td_abs = [[] for _ in range(self.n_network)]
+        self.drawn_transitions = []
+        self.random_transitions = []
+        self.store_td = True
+        ##..
         self.lrs = lrs
         self.alpha = alphas
         self.buffersize = buffersizes
@@ -298,25 +426,37 @@ class DQNAgent:
         # Build and initialize Q-network.
         def build_network(
                 layers: List[int],
-                output_shape: List[int]) -> hk.Transformed:
+                output_shape: List[int],
+                use_noisy_network: bool) -> hk.Transformed:
 
             def q_net(obs):
                 layers_ = tuple(layers) + (onp.prod(output_shape), )
-                network = NoisyMLP(layers_)
+                if use_noisy_network:
+                    network = NoisyMLP(layers_, factorized_noise=self.params.factorized_noise) 
+                else:
+                    network = hk.nets.MLP(layers_)
                 return hk.Reshape(output_shape=output_shape)(network(obs))
 
             return hk.transform(q_net)
+                
+        # define shape of output layer
+        if self.params.use_distribution:
+            output_shape = (action_spec.num_values, params.n_atoms)
+        else:
+            output_shape = (action_spec.num_values,)
 
-        self.network = build_network(params.layers,
-                                     (action_spec.num_values, params.n_atoms))
+        # create the network
+        self.network = build_network(
+            params.layers, # layers
+            output_shape, # output shape
+            params.use_noisy_network # network type
+        )
         rng_init = jnp.asarray([next(self.rng) for i in range(self.num_parallel)])
         parallel_params = jax.vmap(self.network.init, in_axes=(0, None))
         self.trg_params = parallel_params(rng_init, onp.zeros((observation_spec.shape[0], observation_spec.shape[1] * self.params.history_size), dtype = onp.float16))
 
-
-
-
         self.online_params = self.trg_params
+        
         self.atoms = jnp.tile(jnp.linspace(-params.atom_vmax, params.atom_vmax, params.n_atoms),
                               (action_spec.num_values, 1))
 
@@ -331,9 +471,9 @@ class DQNAgent:
 
 
         ## parallelized vmap functions
-        self.update_q_parallel = jax.vmap(DQNLearning.update_q, in_axes=(None, None, None, 0, 0, 0, 0, {"observation_tm1" : 0, "action_tm1" : 0, "reward_t" : 0, "observation_t" : 0, "legal_moves_t" : 0, "terminal_t" : 0}, None, 0, None))
-        self.exploit_eval_policy = jax.vmap(DQNPolicy.eval_policy, in_axes=(None, None, 0, 0, 0, 0))
-        self.exploit_policy = jax.vmap(DQNPolicy.policy, in_axes=(None, None, 0, None, 0, 0, 0))
+        self.update_q_parallel = jax.vmap(DQNLearning.update_q, in_axes=(None, None, None, 0, 0, 0, 0, {"observation_tm1" : 0, "action_tm1" : 0, "reward_t" : 0, "observation_t" : 0, "legal_moves_t" : 0, "terminal_t" : 0}, None, 0, None, None, None, 0, 0 , 0))
+        self.exploit_eval_policy = jax.vmap(DQNPolicy.eval_policy, in_axes=(None, None, None, 0, 0, 0, 0))
+        self.exploit_policy = jax.vmap(DQNPolicy.policy, in_axes=(None, None, None, None, 0, None, None, 0, 0, 0))
 
         self.learning_rate = self.params.learning_rate
 
@@ -394,13 +534,16 @@ class DQNAgent:
         obs_len = int(observations[1][0].shape[0]/self.num_parallel)
         observations_ = observations[1][0].reshape(self.num_parallel, obs_len, -1)
         legal_actions = observations[1][1].reshape(self.num_parallel, obs_len, -1)
+        
         key_rng = jnp.asarray([next(self.rng) for i in range(self.num_parallel)])
         # actions = DQNPolicy.eval_policy(
         actions = self.exploit_eval_policy(
-            self.network, self.atoms, self.online_params,
+            self.network, self.params.use_distribution, self.atoms, self.online_params,
             key_rng, observations_, legal_actions)
-        actions = onp.concatenate(onp.asarray(actions), axis = None)
-        return jax.tree_util.tree_map(onp.array, actions)
+        # actions = onp.concatenate(onp.asarray(actions), axis = None)
+        # return jax.tree_util.tree_map(onp.array, actions)
+        return jax.tree_util.tree_map(onp.array, actions).flatten()
+        ### watchout
         
 
     def explore(self, observations):
@@ -414,11 +557,10 @@ class DQNAgent:
         observations_ = observations[1][0].reshape(self.num_parallel, obs_len, -1)
         legal_actions = observations[1][1].reshape(self.num_parallel, obs_len, -1)
         key_rng = jnp.asarray([next(self.rng) for i in range(self.num_parallel)])
-        # legal_actions = onp.split(observations[1][1], self.num_parallel)
-        # _, actions = DQNPolicy.policy(
+
         _, actions = self.exploit_policy(
-            self.network, self.atoms, self.online_params,
-            self.params.epsilon(self.train_step), key_rng,
+            self.network, self.params.use_distribution, self.params.use_boltzmann_exploration, self.atoms, self.online_params,
+            self.params.epsilon(self.train_step), self.params.tau(self.train_step), key_rng,
             observations_, legal_actions)
         # print('explore took {} seconds'.format(time.time()-start_time))
         actions = onp.concatenate(onp.asarray(actions), axis = None)
@@ -451,7 +593,8 @@ class DQNAgent:
     def shape_rewards(self, observations, moves):
         if self.reward_shaper is not None:
             shaped_rewards, shape_type = self.reward_shaper.shape(observations[0], 
-                                                                  moves)
+                                                                  moves,
+                                                                  self.train_step)
             return onp.array(shaped_rewards), onp.array(shape_type)
         return (onp.zeros(observations[1][0].shape[0]), onp.zeros(observations[1][0].shape[0]))
 
@@ -462,70 +605,80 @@ class DQNAgent:
         """Make one training step.
         """
         # start_time = time.time()
-        if self.params.use_priority:
-            sample_indices, prios, c = [], [], []
-
-            for i in range(self.num_parallel):
-                _samp, _prio, _tra = self.experience[i].sample_batch(self.params.train_batch_size)
-                sample_indices.append(_samp)
-                prios.append(_prio)
-                c.append(_tra._asdict())
-
-            prios = onp.asarray(prios).reshape(self.num_parallel, self.params.train_batch_size)
-
-            transitions = {}
-            for key in c[0]:
-                transitions[key] = onp.stack([b[key] for b in c], axis = 0)
-
-        else:
-            c = []
-            for i in range(self.num_parallel):
-                _c = self.experience[i].sample(self.params.train_batch_size)
-                c.append(_c._asdict())
-
+        if not self.params.fixed_weights:
+            keys_online = jnp.array([next(self.rng) for _ in range(self.n_network)])
+            keys_target = jnp.array([next(self.rng) for _ in range(self.n_network)])
+            keys_sel = jnp.array([next(self.rng) for _ in range(self.n_network)])
+            
+            if self.params.use_priority:
+                sample_indices, prios, c = [], [], []
+    
+                for i in range(self.num_parallel):
+                    _samp, _prio, _tra = self.experience[i].sample_batch(self.params.train_batch_size)
+                    sample_indices.append(_samp)
+                    prios.append(_prio)
+                    c.append(_tra._asdict())
+    
+                prios = onp.asarray(prios).reshape(self.num_parallel, self.params.train_batch_size)
+    
                 transitions = {}
                 for key in c[0]:
                     transitions[key] = onp.stack([b[key] for b in c], axis = 0)
-            prios = onp.ones((self.num_parallel, self.params.train_batch_size))
-        
-        # self.total_sample_time += start_time-time.time()
-        lr = self.lr
-        self.online_params, self.opt_state, tds = self.update_q_parallel(
-            self.network,
-            self.atoms,
-            self.optimizer,
-            self.lr,
-            self.online_params,
-            self.trg_params,
-            self.opt_state,
-            transitions,
-            self.params.discount,
-            prios,
-            self.params.beta_is(self.train_step))
-
-        # time.sleep(0.05)
-        start_time = time.time()
-
-        
-        start_time_2 = time.time()
-        # tds = onp.asarray(tds)  
-        self.parttime_update_1 += (time.time() -start_time_2)
-
-        if self.params.use_priority:
-            self.intermediate_indices.append(sample_indices)
-            self.intermediate_tds.append(tds)
     
-                   
-        self.total_prio_update += start_time-time.time()
-
-        if self.train_step % self.params.target_update_period == 0:
-            self.trg_params = self.online_params
-            # print('add_exp took {:.2f} seconds'.format(self.total_add_time))
-            # print('PrioUpdates took {:.2f}s'.format(self.total_prio_update))
-            # print('Part_time_1 took {:.2f}s'.format(self.parttime_update_1), len(self.experience), self.num_parallel, self.num_unique_parallel)
+            else:
+                c = []
+                for i in range(self.num_parallel):
+                    _c = self.experience[i].sample(self.params.train_batch_size)
+                    c.append(_c._asdict())
+    
+                    transitions = {}
+                    for key in c[0]:
+                        transitions[key] = onp.stack([b[key] for b in c], axis = 0)
+                prios = onp.ones((self.num_parallel, self.params.train_batch_size))
             
-            # print(self.train_step)
-        self.train_step += 1
+            # self.total_sample_time += start_time-time.time()
+            lr = self.lr
+            self.online_params, self.opt_state, tds = self.update_q_parallel(
+                self.network,
+                self.atoms,
+                self.optimizer,
+                self.lr,
+                self.online_params,
+                self.trg_params,
+                self.opt_state,
+                transitions,
+                self.params.discount,
+                prios,
+                self.params.beta_is(self.train_step),
+                self.params.use_double_q,
+                self.params.use_distribution,
+                keys_online,
+                keys_target,
+                keys_sel)
+    
+            # time.sleep(0.05)
+            start_time = time.time()
+    
+            
+            start_time_2 = time.time()
+            # tds = onp.asarray(tds)  
+            self.parttime_update_1 += (time.time() -start_time_2)
+    
+            if self.params.use_priority:
+                self.intermediate_indices.append(sample_indices)
+                self.intermediate_tds.append(tds)
+        
+                       
+            self.total_prio_update += start_time-time.time()
+    
+            if self.train_step % self.params.target_update_period == 0:
+                self.trg_params = self.online_params
+                # print('add_exp took {:.2f} seconds'.format(self.total_add_time))
+                # print('PrioUpdates took {:.2f}s'.format(self.total_prio_update))
+                # print('Part_time_1 took {:.2f}s'.format(self.parttime_update_1), len(self.experience), self.num_parallel, self.num_unique_parallel)
+                
+                # print(self.train_step)
+            self.train_step += 1
 
     # additional function that splits update() in case of priority_buffer==True into two function
     # optimizes CPU/GPU utilization through batching of prio updates and avoiding CPU-Idle time
@@ -633,4 +786,3 @@ class DQNAgent:
         self.buffersize = int(buffersize_survivor * random.choice(choices))
 
         self.experience.change_size(self.buffersize)
-
