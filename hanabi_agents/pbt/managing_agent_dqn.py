@@ -138,7 +138,7 @@ class AgentDQNPopulation:
                 custom_params = custom_params._replace(experience_buffer_size = sample_buffersize())
                 custom_params = custom_params._replace(priority_w = sample_init_alpha())
                 #alpha
-                agent = DQNParallel(self.env_obs_size,
+                agent = DQNAgent(self.env_obs_size,
                                         self.env_act_size,
                                         custom_params)
                 self.agents.append(agent)
@@ -148,7 +148,7 @@ class AgentDQNPopulation:
                 custom_params = custom_params._replace(learning_rate = agent_data[j]['lr'])
                 custom_params = custom_params._replace(experience_buffer_size = agent_data[j]['buffersize'])
                 custom_params = custom_params._replace(priority_w = agent_data[j]['alpha'])
-                agent = DQNParallel(self.env_obs_size,
+                agent = DQNAgent(self.env_obs_size,
                         self.env_act_size,
                         custom_params)
                 self.agents.append(agent)
