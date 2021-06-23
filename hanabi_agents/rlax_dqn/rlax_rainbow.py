@@ -28,6 +28,30 @@ from .vectorized_stacker import VectorizedObservationStacker
 DiscreteDistribution = collections.namedtuple(
     "DiscreteDistribution", ["sample", "probs", "logprob", "entropy"])
 
+# Function used to initialise the transformation's state.
+TransformInitFn = Callable[
+    [Params],
+    Union[OptState, Sequence[OptState]]]
+# Function used to apply a transformation.
+TransformUpdateFn = Callable[
+    [Updates, OptState, Optional[Params]],
+    Tuple[Updates, OptState]]
+
+class GradientTransformation(NamedTuple):
+  """Optax transformations consists of a function pair: (initialise, update)."""
+  init: TransformInitFn
+  update: TransformUpdateFn
+
+def custom_adam(b1: float = 0.9, 
+                b2: float = 0.999, 
+                eps: float = 1e-8,
+                eps_root: float = 0.0) -> GradientTransformation: 
+    return combine.chain(
+        transform.scale_by_adam(b1=b1, b2=b2, eps=eps, eps_root=eps_root))
+
+def apply_lr(lr, updates, state):
+    updates = jax.tree_map(lambda g: -lr * g, updates)
+    return updates
 
 class DQNPolicy:
     """greedy and epsilon-greedy policies for DQN agent"""
@@ -212,8 +236,8 @@ class DQNPolicy:
 class DQNLearning:
     
     @staticmethod
-    @partial(jax.jit, static_argnums=(0, 2, 10, 11))
-    def update_q(network, atoms, optimizer, online_params, trg_params, opt_state,
+    @partial(jax.jit, static_argnums=(0, 2, 11, 12))
+    def update_q(network, atoms, optimizer, lr, online_params, trg_params, opt_state,
                  transitions, discount_t, prios, beta_is, use_double_q, use_distribution, 
                  key_online, key_target, key_selector): 
         """Update network weights wrt Q-learning loss.
@@ -333,6 +357,7 @@ class DQNLearning:
         )
 
         updates, opt_state_t = optimizer.update(grads, opt_state)
+        updates = apply_lr(lr, updates, opt_state)
         online_params_t = optax.apply_updates(online_params, updates)
         return online_params_t, opt_state_t, new_prios
 
@@ -415,7 +440,11 @@ class DQNAgent:
         )
 
         # Build and initialize Adam optimizer.
-        self.optimizer = optax.adam(params.learning_rate, eps=3.125e-5)
+        # self.optimizer = optax.adam(params.learning_rate, eps=3.125e-5)
+        self.lr = onp.zeros(self.n_network)
+        for i in range(self.n_network):
+            self.lr[i] = params.learning_rate        
+        self.optimizer = custom_adam(eps = 3.125e-5)
         parallel_opt_init = jax.vmap(self.optimizer.init, in_axes=(0,))
         self.opt_state = parallel_opt_init(self.online_params)
         
@@ -447,7 +476,8 @@ class DQNAgent:
         
         obs = observations.reshape(self.n_network, -1, observations.shape[1])
         vla = legal_actions.reshape(self.n_network, -1, legal_actions.shape[1])
-        keys = jnp.array([next(self.rng) for _ in range(self.n_network)])
+        # keys = jnp.array([next(self.rng) for _ in range(self.n_network)])
+        keys = onp.array([onp.random.randint(2147483647, size = 2, dtype='uint32') for _ in range(self.n_network)])
         
         parallel_eval = jax.vmap(DQNPolicy.eval_policy, in_axes=(None, None, None, 0, 0, 0, 0))
         actions, q_values = parallel_eval(self.network, self.params.use_distribution, self.atoms, 
@@ -461,7 +491,7 @@ class DQNAgent:
         
         obs = observations.reshape(self.n_network, -1, observations.shape[1])
         vla = legal_actions.reshape(self.n_network, -1, legal_actions.shape[1])
-        keys = jnp.array([next(self.rng) for _ in range(self.n_network)])
+        keys = onp.array([onp.random.randint(2147483647, size = 2, dtype='uint32') for _ in range(self.n_network)])
         
         parallel_eval = jax.vmap(DQNPolicy.policy, in_axes=(None, None, None, None, 0, None, None, 0, 0, 0))
         _, actions = parallel_eval(
@@ -505,9 +535,9 @@ class DQNAgent:
         if not self.params.fixed_weights:
             
             transitions, sample_indices, prios = self.buffer.sample(self.params.train_batch_size)      
-            keys_online = jnp.array([next(self.rng) for _ in range(self.n_network)])
-            keys_target = jnp.array([next(self.rng) for _ in range(self.n_network)])
-            keys_sel = jnp.array([next(self.rng) for _ in range(self.n_network)])
+            keys_online = onp.array([onp.random.randint(2147483647, size = 2, dtype='uint32') for _ in range(self.n_network)])
+            keys_target = onp.array([onp.random.randint(2147483647, size = 2, dtype='uint32') for _ in range(self.n_network)])
+            keys_sel = onp.array([onp.random.randint(2147483647, size = 2, dtype='uint32') for _ in range(self.n_network)])
             
             #keys_online = [None for _ in range(self.n_network)]
             #keys_target = [None for _ in range(self.n_network)]
@@ -521,6 +551,7 @@ class DQNAgent:
                 self.network,
                 self.atoms,
                 self.optimizer,
+                self.lr,
                 self.online_params,
                 self.trg_params,
                 self.opt_state,
