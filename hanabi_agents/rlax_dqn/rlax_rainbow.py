@@ -551,7 +551,7 @@ class DQNAgent:
             #keys_target = [None for _ in range(self.n_network)]
             #keys_sel = [None for _ in range(self.n_network)]
             
-            parallel_update = jax.vmap(self.update_q, in_axes=(None, None, None, 0, 0, 0, 
+            parallel_update = jax.vmap(self.update_q, in_axes=(None, None, None,0, 0, 0, 0, 
                                                                0, None, 0, None, None, None, 0, 0, 0))
 
             
