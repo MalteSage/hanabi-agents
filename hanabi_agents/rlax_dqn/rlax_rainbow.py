@@ -32,6 +32,10 @@ from typing import NamedTuple, Any, Callable, Sequence, Optional, Union
 DiscreteDistribution = collections.namedtuple(
     "DiscreteDistribution", ["sample", "probs", "logprob", "entropy"])
 
+OptState = NamedTuple  # Transformation states are (possibly empty) namedtuples.
+Params = Any  # Parameters are arbitrary nests of `jnp.ndarrays`.
+Updates = Params  # Gradient updates are of the same type as parameters.
+
 # Function used to initialise the transformation's state.
 TransformInitFn = Callable[
     [Params],
