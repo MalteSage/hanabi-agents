@@ -25,6 +25,10 @@ from .noisy_mlp2 import NoisyMLP2
 from .params import RlaxRainbowParams
 from .vectorized_stacker import VectorizedObservationStacker
 
+from optax._src import combine
+from optax._src import transform
+from typing import NamedTuple, Any, Callable, Sequence, Optional, Union
+
 DiscreteDistribution = collections.namedtuple(
     "DiscreteDistribution", ["sample", "probs", "logprob", "entropy"])
 
