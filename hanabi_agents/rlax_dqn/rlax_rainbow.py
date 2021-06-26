@@ -606,7 +606,8 @@ class DQNAgent:
                 
                 tds_abs = jax.tree_util.tree_map(onp.array, tds)
                 if self.store_td:
-                    random_transitions = self.buffer.sample_random(self.params.train_batch_size)[0]
+                    print('store_td TRUE')
+                    random_transitions = self.buffer[0].sample_random(self.params.train_batch_size)[0]
                     del transitions['observation_tm1']
                     del transitions['observation_t']
                     del random_transitions['observation_tm1']
