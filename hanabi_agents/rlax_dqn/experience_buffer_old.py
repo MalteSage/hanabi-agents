@@ -1,6 +1,6 @@
 from typing import Tuple
 import numpy as np
-from .transition import Transition
+from .transition_old import Transition
 
 class ExperienceBuffer:
     """ExperienceBuffer stores transitions for training"""
