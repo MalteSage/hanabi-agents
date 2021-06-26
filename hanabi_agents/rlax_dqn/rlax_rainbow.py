@@ -398,7 +398,7 @@ class DQNAgent:
         self.drawn_td_abs = [[] for _ in range(self.n_network)]
         self.drawn_transitions = []
         self.random_transitions = []
-        self.store_td = True
+        self.store_td = False
 
         # Function to build and initialize Q-network. Use Noisy Network or MLP
         def build_network(
@@ -615,7 +615,8 @@ class DQNAgent:
                     self.random_transitions.append(random_transitions)
                     for i, td in enumerate(tds_abs):
                         self.drawn_td_abs[i].extend(td)
-                self.buffer.update_priorities(sample_indices, tds_abs)
+                for i in range(self.n_network):
+                    self.buffer[i].update_priorities(sample_indices[i], tds_abs[i])
 
             if self.train_step % self.params.target_update_period == 0:
                 self.trg_params = self.online_params
