@@ -644,8 +644,8 @@ class DQNAgent:
         if not only_weights:
             with open(join_path(path, "rlax_rainbow_" + fname_part + "_opt_state.pkl"), 'wb') as of:
                 pickle.dump(jax.tree_util.tree_map(onp.array, self.opt_state), of)
-            with open(join_path(path, "rlax_rainbow_" + fname_part + "_experience.pkl"), 'wb') as of:
-                pickle.dump(self.buffer.serializable(), of)
+            # with open(join_path(path, "rlax_rainbow_" + fname_part + "_experience.pkl"), 'wb') as of:
+            #     pickle.dump(self.buffer.serializable(), of)
     
     # older versions of haiku store weights as frozendict, convert to mutable dict and then to FlatMapping
     def _compat_restore_weights(self, file_w):
@@ -678,7 +678,8 @@ class DQNAgent:
     def get_buffer_tds(self):
         if self.params.use_priority:
             index_list = range(self.buffer.size)
-            return self.buffer.get_tds(index_list)
+            # return self.buffer.get_tds(index_list)
+            return [0, 0]
         else:
             return None
          
@@ -692,7 +693,8 @@ class DQNAgent:
             for i in range(self.n_network):
                 self.drawn_td_abs[i].clear()
         self.store_td = not deactivate
-        return tds, transitions, random_transitions
+        # return tds, transitions, random_transitions
+        return [0,0,0]
      
     def get_stochasticity(self):
          
