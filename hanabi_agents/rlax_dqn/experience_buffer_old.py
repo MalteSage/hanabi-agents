@@ -84,7 +84,7 @@ class ExperienceBuffer:
                  reward{batch_size, 1}, q_vals{batch_size, max_moves})
         """
         indices = np.random.choice(self._sample_range[:self.size], size=batch_size)
-        return self[indices]
+        return self[indices], indices, np.ones(batch_size))
 
     def serializable(self):      
         lst_serialize = [self.obs_tm1_buf, 

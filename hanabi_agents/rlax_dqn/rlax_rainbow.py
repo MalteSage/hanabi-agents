@@ -558,7 +558,7 @@ class DQNAgent:
             sample_indices, prios, c = [], [], []
 
             for i in range(self.n_network):
-                _samp, _prio, _tra = self.buffer[i].sample(self.params.train_batch_size)
+                _tra, _samp, _prio = self.buffer[i].sample(self.params.train_batch_size)
                 sample_indices.append(_samp)
                 prios.append(_prio)
                 c.append(_tra._asdict())
