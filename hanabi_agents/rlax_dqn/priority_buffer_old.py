@@ -14,7 +14,7 @@ class PriorityBuffer(ExperienceBuffer):
     def __init__(self,
                  capacity: int, observation_len: int, alpha: int = 0.6):
         super(PriorityBuffer, self).__init__(capacity, observation_len)
-        self.td_buf = np.empty((self.capacity, 1), dtype=np.float64)
+        self.td_buf = onp.empty((self.capacity, 1), dtype=np.float64)
         self.sum_tree = SumTree(capacity)
         self.max_priority = alpha
         self.min_priority = alpha
