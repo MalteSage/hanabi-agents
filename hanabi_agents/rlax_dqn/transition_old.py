@@ -11,4 +11,4 @@ from collections import namedtuple
 
 Transition = namedtuple(
     "Transition",
-    ["observation_tm1", "action_tm1", "reward_t", "observation_t", "legal_moves_t", "terminal_t"])
+    ["observation_tm1", "action_tm1", "reward_t", "observation_t", "terminal_t"])
