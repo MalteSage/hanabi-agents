@@ -681,7 +681,7 @@ class DQNAgent:
                 
     def get_buffer_tds(self):
         if self.params.use_priority:
-            index_list = range(self.buffer.size)
+            # index_list = range(self.buffer.size)
             # return self.buffer.get_tds(index_list)
             return [0, 0]
         else:
