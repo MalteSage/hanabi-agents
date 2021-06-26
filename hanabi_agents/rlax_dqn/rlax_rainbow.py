@@ -469,14 +469,12 @@ class DQNAgent:
             self.buffer = [PriorityBuffer(
                 params.experience_buffer_size,
                 observation_spec.shape[1] * self.params.history_size,
-                params.n_network,
                 self.params.priority_w
             ) for i in range(self.n_network)]
         else:
             self.buffer = [ExperienceBuffer(
                 params.experience_buffer_size,
-                observation_spec.shape[1] * self.params.history_size,
-                params.n_network
+                observation_spec.shape[1] * self.params.history_size
             ) for i in range(self.n_network)]
             
         self.requires_vectorized_observation = lambda: True
