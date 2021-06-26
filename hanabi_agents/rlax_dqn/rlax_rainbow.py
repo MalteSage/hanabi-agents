@@ -19,7 +19,7 @@ import chex
 
 # from .experience_buffer import ExperienceBuffer, sample_from_buffer
 # from .priority_buffer import PriorityBuffer
-from .experience_buffer_old import ExperienceBuffer, sample_from_buffer
+from .experience_buffer_old import ExperienceBuffer
 from .priority_buffer_old import PriorityBuffer
 from .noisy_mlp import NoisyMLP
 # from .noisy_mlp2 import NoisyMLP2
