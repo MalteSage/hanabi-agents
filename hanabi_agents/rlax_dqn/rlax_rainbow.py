@@ -563,7 +563,7 @@ class DQNAgent:
                 prios.append(_prio)
                 c.append(_tra._asdict())
 
-            prios = onp.asarray(prios).reshape(self.num_parallel, self.params.train_batch_size)
+            prios = onp.asarray(prios).reshape(self.n_network, self.params.train_batch_size)
 
             transitions = {}
             for key in c[0]:
