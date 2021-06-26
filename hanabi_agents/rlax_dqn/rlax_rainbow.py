@@ -483,7 +483,7 @@ class DQNAgent:
         self.parallel_update = jax.vmap(self.update_q, in_axes=(None, None, None,0, 0, 0, 0, 
                                                                {"observation_tm1" : 0, "action_tm1" : 0, "reward_t" : 0, "observation_t" : 0, "terminal_t" : 0},
                                                                None, 0, None, None, None, 0, 0, 0))
-        self.parallel_eval = jax.vmap(DQNPolicy.eval_policy, in_axes=(None, None, None, 0, 0, 0, 0))
+        self.parallel_eval_exploit = jax.vmap(DQNPolicy.eval_policy, in_axes=(None, None, None, 0, 0, 0, 0))
         self.parallel_eval = jax.vmap(DQNPolicy.policy, in_axes=(None, None, None, None, 0, None, None, 0, 0, 0))
 
 
@@ -496,7 +496,7 @@ class DQNAgent:
         keys = onp.array([onp.random.randint(2147483647, size = 2, dtype='uint32') for _ in range(self.n_network)])
         
         
-        actions, q_values = self.parallel_eval(self.network, self.params.use_distribution, self.atoms, 
+        actions, q_values = self.parallel_eval_exploit(self.network, self.params.use_distribution, self.atoms, 
                                 self.online_params, keys, obs, vla)
         
         return (jax.tree_util.tree_map(onp.array, actions).flatten(),
