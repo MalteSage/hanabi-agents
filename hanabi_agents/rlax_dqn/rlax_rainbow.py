@@ -605,17 +605,17 @@ class DQNAgent:
             if self.params.use_priority:
                 
                 tds_abs = jax.tree_util.tree_map(onp.array, tds)
-                if self.store_td:
-                    print('store_td TRUE')
-                    random_transitions = self.buffer[0].sample_random(self.params.train_batch_size)[0]
-                    del transitions['observation_tm1']
-                    del transitions['observation_t']
-                    del random_transitions['observation_tm1']
-                    del random_transitions['observation_t']
-                    self.drawn_transitions.append(transitions)
-                    self.random_transitions.append(random_transitions)
-                    for i, td in enumerate(tds_abs):
-                        self.drawn_td_abs[i].extend(td)
+                # if self.store_td:
+                #     print('store_td TRUE')
+                #     random_transitions = self.buffer[0].sample_random(self.params.train_batch_size)[0]
+                #     del transitions['observation_tm1']
+                #     del transitions['observation_t']
+                #     del random_transitions['observation_tm1']
+                #     del random_transitions['observation_t']
+                #     self.drawn_transitions.append(transitions)
+                #     self.random_transitions.append(random_transitions)
+                #     for i, td in enumerate(tds_abs):
+                #         self.drawn_td_abs[i].extend(td)
                 for i in range(self.n_network):
                     self.buffer[i].update_priorities(sample_indices[i], tds_abs[i])
 
