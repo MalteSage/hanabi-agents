@@ -479,6 +479,14 @@ class DQNAgent:
             
         self.requires_vectorized_observation = lambda: True
 
+
+        self.parallel_update = jax.vmap(self.update_q, in_axes=(None, None, None,0, 0, 0, 0, 
+                                                               {"observation_tm1" : 0, "action_tm1" : 0, "reward_t" : 0, "observation_t" : 0, "terminal_t" : 0},
+                                                               None, 0, None, None, None, 0, 0, 0))
+        self.parallel_eval = jax.vmap(DQNPolicy.eval_policy, in_axes=(None, None, None, 0, 0, 0, 0))
+        self.parallel_eval = jax.vmap(DQNPolicy.policy, in_axes=(None, None, None, None, 0, None, None, 0, 0, 0))
+
+
     def exploit(self, observations):
         observations, legal_actions = observations[1]
         
@@ -487,8 +495,8 @@ class DQNAgent:
         # keys = jnp.array([next(self.rng) for _ in range(self.n_network)])
         keys = onp.array([onp.random.randint(2147483647, size = 2, dtype='uint32') for _ in range(self.n_network)])
         
-        parallel_eval = jax.vmap(DQNPolicy.eval_policy, in_axes=(None, None, None, 0, 0, 0, 0))
-        actions, q_values = parallel_eval(self.network, self.params.use_distribution, self.atoms, 
+        
+        actions, q_values = self.parallel_eval(self.network, self.params.use_distribution, self.atoms, 
                                 self.online_params, keys, obs, vla)
         
         return (jax.tree_util.tree_map(onp.array, actions).flatten(),
@@ -501,8 +509,8 @@ class DQNAgent:
         vla = legal_actions.reshape(self.n_network, -1, legal_actions.shape[1])
         keys = onp.array([onp.random.randint(2147483647, size = 2, dtype='uint32') for _ in range(self.n_network)])
         
-        parallel_eval = jax.vmap(DQNPolicy.policy, in_axes=(None, None, None, None, 0, None, None, 0, 0, 0))
-        _, actions = parallel_eval(
+        
+        _, actions = self.parallel_eval(
             self.network, self.params.use_distribution, self.params.use_boltzmann_exploration,
             self.atoms, self.online_params, 
             self.params.epsilon(self.train_step), self.params.tau(self.train_step), 
@@ -579,12 +587,8 @@ class DQNAgent:
             #keys_target = [None for _ in range(self.n_network)]
             #keys_sel = [None for _ in range(self.n_network)]
             
-            parallel_update = jax.vmap(self.update_q, in_axes=(None, None, None,0, 0, 0, 0, 
-                                                               {"observation_tm1" : 0, "action_tm1" : 0, "reward_t" : 0, "observation_t" : 0, "terminal_t" : 0},
-                                                               None, 0, None, None, None, 0, 0, 0))
-
             
-            self.online_params, self.opt_state, tds = parallel_update(
+            self.online_params, self.opt_state, tds = self.parallel_update(
                 self.network,
                 self.atoms,
                 self.optimizer,
