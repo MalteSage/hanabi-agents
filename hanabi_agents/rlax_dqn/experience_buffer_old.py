@@ -45,7 +45,7 @@ class ExperienceBuffer:
         batch_size = len(observation_tm1)
         if self.oldest_entry + batch_size <= self.capacity:
             self._obs_tm1_buf[self.oldest_entry : self.oldest_entry + batch_size, :] = observation_tm1
-            self._act_tm1_buf[self.oldest_entry : self.oldest_entry + batch_size, :] = action_tm1
+            self._act_tm1_buf[self.oldest_entry : self.oldest_entry + batch_size, :] = action_tm1.reshape(-1,1)
             self._obs_t_buf[self.oldest_entry : self.oldest_entry + batch_size, :] = observation_t
             self._rew_t_buf[self.oldest_entry : self.oldest_entry + batch_size, :] = reward_t
             self._terminal_t_buf[self.oldest_entry : self.oldest_entry + batch_size, :] = terminal_t
