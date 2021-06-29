@@ -403,8 +403,9 @@ class DQNAgent:
         self.drawn_transitions = []
         self.random_transitions = []
         self.store_td = False
-        self.past_obs = onp.zeros((self.params.past_obs_size, observation_spec.shape[1]))
-        self.past_lms = onp.zeros((self.params.past_obs_size, action_spec.num_values))
+        if self.params.pbt == True:
+            self.past_obs = onp.zeros((self.params.past_obs_size, observation_spec.shape[1]))
+            self.past_lms = onp.zeros((self.params.past_obs_size, action_spec.num_values))
 
         # Function to build and initialize Q-network. Use Noisy Network or MLP
         def build_network(

@@ -28,6 +28,7 @@ class RlaxRainbowParams(NamedTuple):
     fixed_weights: bool = False
     n_network: int = 1 # number of networks trained in parallel
     factorized_noise: bool = False
+    pbt: bool = False
     
 @gin.configurable
 class RewardShapingParams(NamedTuple):
@@ -74,7 +75,7 @@ class PBTParams(NamedTuple):
     w_diversity: float = 10
     obs_no: int = 10000
     n_mean: int = 5
-    pbt: bool = False
+
 
 
 
