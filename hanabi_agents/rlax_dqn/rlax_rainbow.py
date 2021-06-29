@@ -379,9 +379,10 @@ class DQNAgent:
             action_spec,
             params: RlaxRainbowParams = RlaxRainbowParams(),
             reward_shaper = None,
+            buffersizes = None,
             lrs = None,
             alphas = None,
-            buffersizes = None):
+            ):
 
         if not callable(params.epsilon):
             eps = params.epsilon
