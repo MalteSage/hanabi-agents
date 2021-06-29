@@ -378,7 +378,10 @@ class DQNAgent:
             observation_spec,
             action_spec,
             params: RlaxRainbowParams = RlaxRainbowParams(),
-            reward_shaper = None):
+            reward_shaper = None,
+            lrs = None,
+            alphas = None,
+            buffersizes = None):
 
         if not callable(params.epsilon):
             eps = params.epsilon
@@ -399,6 +402,8 @@ class DQNAgent:
         self.drawn_transitions = []
         self.random_transitions = []
         self.store_td = False
+        self.past_obs = onp.zeros((self.params.past_obs_size, observation_spec.shape[1]))
+        self.past_lms = onp.zeros((self.params.past_obs_size, action_spec.num_values))
 
         # Function to build and initialize Q-network. Use Noisy Network or MLP
         def build_network(
@@ -451,9 +456,12 @@ class DQNAgent:
 
         # Build and initialize Adam optimizer.
         # self.optimizer = optax.adam(params.learning_rate, eps=3.125e-5)
-        self.lr = onp.zeros(self.n_network)
-        for i in range(self.n_network):
-            self.lr[i] = params.learning_rate        
+        if lrs is None:
+            self.lr = onp.zeros(self.n_network)
+            for i in range(self.n_network):
+                self.lr[i] = params.learning_rate
+        else:
+            self.lr = onp.asarray(lrs)        
         self.optimizer = custom_adam(eps = 3.125e-5)
         parallel_opt_init = jax.vmap(self.optimizer.init, in_axes=(0,))
         self.opt_state = parallel_opt_init(self.online_params)
@@ -464,35 +472,52 @@ class DQNAgent:
         # Define the update function
         self.update_q = DQNLearning.update_q
 
-        # Create Buffer (Priority Buffer or Experience Buffer)
+        #define if same parameters or set of different parameters
+        if buffersizes is None:
+            self.buffersize = [params.experience_buffer_size for i in range(self.n_network)]
+        else:
+            self.buffersize = buffersizes
+        if alphas is None:
+            self.alpha = [params.priority_w for i in range(self.n_network)]
+        else:
+            self.alpha = alphas
+        # Create Buffer (Priority Buffer or Experience Buffer)    
         if params.use_priority:
             self.buffer = [PriorityBuffer(
-                params.experience_buffer_size,
+                self.buffersize[i],
                 observation_spec.shape[1] * self.params.history_size,
-                self.params.priority_w
+                self.alpha[i]
             ) for i in range(self.n_network)]
         else:
             self.buffer = [ExperienceBuffer(
-                params.experience_buffer_size,
+                self.buffersize[i],
                 observation_spec.shape[1] * self.params.history_size
             ) for i in range(self.n_network)]
             
         self.requires_vectorized_observation = lambda: True
 
-
-        self.parallel_update = jax.vmap(self.update_q, in_axes=(None, None, None,0, 0, 0, 0, 
+        # vmapped functions for parallel training of n_networks of agents
+        self.parallel_update = jax.vmap(self.update_q, in_axes=(None, None, None, 0, 0, 0, 0, 
                                                                {"observation_tm1" : 0, "action_tm1" : 0, "reward_t" : 0, "observation_t" : 0, "terminal_t" : 0},
                                                                None, 0, None, None, None, 0, 0, 0))
         self.parallel_eval_exploit = jax.vmap(DQNPolicy.eval_policy, in_axes=(None, None, None, 0, 0, 0, 0))
         self.parallel_eval = jax.vmap(DQNPolicy.policy, in_axes=(None, None, None, None, 0, None, None, 0, 0, 0))
 
 
-    def exploit(self, observations):
+    def exploit(self, observations, eval = False):
+        if eval == False:
+            # print(self.past_obs.shape)
+            self.past_obs = onp.roll(self.past_obs, -int(observations[1][0].shape[0]), axis=0)
+            self.past_obs[-int(observations[1][0].shape[0]):, :] = observations[1][0]
+            self.past_lms = onp.roll(self.past_lms, -int(observations[1][1].shape[0]), axis=0)
+            self.past_lms[-int(observations[1][1].shape[0]):, :] = observations[1][1]
+
+
+
         observations, legal_actions = observations[1]
         
         obs = observations.reshape(self.n_network, -1, observations.shape[1])
         vla = legal_actions.reshape(self.n_network, -1, legal_actions.shape[1])
-        # keys = jnp.array([next(self.rng) for _ in range(self.n_network)])
         keys = onp.array([onp.random.randint(2147483647, size = 2, dtype='uint32') for _ in range(self.n_network)])
         
         
@@ -503,6 +528,12 @@ class DQNAgent:
                 jax.tree_util.tree_map(onp.array, q_values).flatten())
 
     def explore(self, observations):
+
+        self.past_obs = onp.roll(self.past_obs, -int(observations[1][0].shape[0]), axis=0)
+        self.past_obs[-int(observations[1][0].shape[0]):, :] = observations[1][0]
+        self.past_lms = onp.roll(self.past_lms, -int(observations[1][1].shape[0]), axis=0)
+        self.past_lms[-int(observations[1][1].shape[0]):, :] = observations[1][1]
+
         observations, legal_actions = observations[1]
         
         obs = observations.reshape(self.n_network, -1, observations.shape[1])
@@ -538,13 +569,6 @@ class DQNAgent:
                 obs_vec_t[i*obs_len:(i+1)*obs_len],
                 term_t[i*obs_len:(i+1)*obs_len])
 
-        # reshape input
-        # obs_vec_tm1 = obs_vec_tm1.reshape(self.n_network, -1 , obs_vec_tm1.shape[1])
-        # obs_vec_t = obs_vec_t.reshape(self.n_network, -1 , obs_vec_t.shape[1])
-        # actions_tm1 = actions_tm1.reshape(self.n_network, -1, 1)
-        # rewards_t = rewards_t.reshape(self.n_network, -1, 1)
-        # term_t = term_t.reshape(self.n_network, -1, 1)
-        # self.buffer.add(obs_vec_tm1, actions_tm1, rewards_t, obs_vec_t, term_t)
         
     def shape_rewards(self, observations, moves):
         
@@ -560,8 +584,6 @@ class DQNAgent:
         """
         
         if not self.params.fixed_weights:
-            
-            # transitions, sample_indices, prios = self.buffer.sample(self.params.train_batch_size)      
             
             sample_indices, prios, c = [], [], []
 
@@ -582,10 +604,6 @@ class DQNAgent:
             keys_online = onp.array([onp.random.randint(2147483647, size = 2, dtype='uint32') for _ in range(self.n_network)])
             keys_target = onp.array([onp.random.randint(2147483647, size = 2, dtype='uint32') for _ in range(self.n_network)])
             keys_sel = onp.array([onp.random.randint(2147483647, size = 2, dtype='uint32') for _ in range(self.n_network)])
-            
-            #keys_online = [None for _ in range(self.n_network)]
-            #keys_target = [None for _ in range(self.n_network)]
-            #keys_sel = [None for _ in range(self.n_network)]
             
             
             self.online_params, self.opt_state, tds = self.parallel_update(
