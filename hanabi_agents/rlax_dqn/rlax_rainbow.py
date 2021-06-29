@@ -507,11 +507,12 @@ class DQNAgent:
 
     def exploit(self, observations, eval = False):
         if eval == False:
-            # print(self.past_obs.shape)
-            self.past_obs = onp.roll(self.past_obs, -int(observations[1][0].shape[0]), axis=0)
-            self.past_obs[-int(observations[1][0].shape[0]):, :] = observations[1][0]
-            self.past_lms = onp.roll(self.past_lms, -int(observations[1][1].shape[0]), axis=0)
-            self.past_lms[-int(observations[1][1].shape[0]):, :] = observations[1][1]
+            if pbt_params.pbt == True:
+                # print(self.past_obs.shape)
+                self.past_obs = onp.roll(self.past_obs, -int(observations[1][0].shape[0]), axis=0)
+                self.past_obs[-int(observations[1][0].shape[0]):, :] = observations[1][0]
+                self.past_lms = onp.roll(self.past_lms, -int(observations[1][1].shape[0]), axis=0)
+                self.past_lms[-int(observations[1][1].shape[0]):, :] = observations[1][1]
 
 
 
@@ -529,11 +530,11 @@ class DQNAgent:
                 jax.tree_util.tree_map(onp.array, q_values).flatten())
 
     def explore(self, observations):
-
-        self.past_obs = onp.roll(self.past_obs, -int(observations[1][0].shape[0]), axis=0)
-        self.past_obs[-int(observations[1][0].shape[0]):, :] = observations[1][0]
-        self.past_lms = onp.roll(self.past_lms, -int(observations[1][1].shape[0]), axis=0)
-        self.past_lms[-int(observations[1][1].shape[0]):, :] = observations[1][1]
+        if pbt_params.pbt == True:
+            self.past_obs = onp.roll(self.past_obs, -int(observations[1][0].shape[0]), axis=0)
+            self.past_obs[-int(observations[1][0].shape[0]):, :] = observations[1][0]
+            self.past_lms = onp.roll(self.past_lms, -int(observations[1][1].shape[0]), axis=0)
+            self.past_lms[-int(observations[1][1].shape[0]):, :] = observations[1][1]
 
         observations, legal_actions = observations[1]
         
