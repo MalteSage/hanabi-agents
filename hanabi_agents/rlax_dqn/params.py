@@ -12,7 +12,7 @@ class RlaxRainbowParams(NamedTuple):
     epsilon: Union[Callable[[int], float], float] = lambda x: 0.0
     tau: Union[Callable[[int], float], float] = lambda x: 0.1
     learning_rate: float = 2.5e-4
-    layers: List[int] = [512]
+    layers: List[int] = [512, 512]
     use_double_q: bool = True
     use_distribution: bool = True
     use_priority: bool = True
