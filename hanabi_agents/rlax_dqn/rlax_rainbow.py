@@ -649,7 +649,7 @@ class DQNAgent:
     def __repr__(self):
         return f"<rlax_dqn.DQNAgent(params={self.params})>"
     
-    def save_weights(self, path, fname_part, only_weights=True):
+    def save_weights(self, path, fname_part, only_weights=True, epochs_alive):
         """Save online and target network weights to the specified path
         added: save optimizer state"""
         
@@ -661,6 +661,10 @@ class DQNAgent:
         if not only_weights:
             with open(join_path(path, "rlax_rainbow_" + fname_part + "_opt_state.pkl"), 'wb') as of:
                 pickle.dump(jax.tree_util.tree_map(onp.array, self.opt_state), of)
+
+            parameters = {'lr':self.lr, 'buffersize':self.buffersize, 'alpha':self.alpha, 'epoch_alive':epochs_alive}
+            with open(join_path(path, "rlax_rainbow_" + fname_part + "parameters.pkl"), 'wb') as of:
+                pickle.dump(parameters, of)
             # with open(join_path(path, "rlax_rainbow_" + fname_part + "_experience.pkl"), 'wb') as of:
             #     pickle.dump(self.buffer.serializable(), of)
     
@@ -675,7 +679,8 @@ class DQNAgent:
     def restore_weights(self, online_weights_file, 
                         trg_weights_file, 
                         opt_state_file=None, 
-                        experience_file=None):
+                        experience_file=None,
+                        parameter_file=None):
         """Restore online and target network weights from the specified files
         added: load optimizer state if file name given"""
         with open(online_weights_file, 'rb') as iwf:
@@ -691,6 +696,18 @@ class DQNAgent:
         if experience_file is not None:
             with open(experience_file, 'rb') as iwf:
                 self.buffer.load(pickle.load(iwf))
+        epoch_alive = None
+        if parameter_file is not None:
+            with open(paremter_file, 'rb') as iwf:
+                parameters = pickle.load(iwf)
+                self.buffersize = paramters['buffersize']
+                self.alpha = paramters['alpha']
+                self.lr = parameters['lr']
+                for i, size in enumerate(self.buffersize):
+                    self.buffer[i].change_buffersize(size)
+                    self.buffer.alpha = self.alpha[i]
+                epochs_alive = parameters['epoch_alive']
+        return epoch_alive
                 
     def get_buffer_tds(self):
         if self.params.use_priority:
