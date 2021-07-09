@@ -705,7 +705,7 @@ class DQNAgent:
                 self.alpha = parameters['alpha']
                 self.lr = parameters['lr']
                 for i, size in enumerate(self.buffersize):
-                    self.buffer[i].change_buffersize(size)
+                    self.buffer[i].change_size(size)
                     self.buffer.alpha = self.alpha[i]
                 epochs_alive = parameters['epoch_alive']
         return epoch_alive
