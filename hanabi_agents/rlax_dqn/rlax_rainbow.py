@@ -663,7 +663,7 @@ class DQNAgent:
                 pickle.dump(jax.tree_util.tree_map(onp.array, self.opt_state), of)
 
             parameters = {'lr':self.lr, 'buffersize':self.buffersize, 'alpha':self.alpha, 'epoch_alive':epochs_alive}
-            with open(join_path(path, "rlax_rainbow_" + fname_part + "parameters.pkl"), 'wb') as of:
+            with open(join_path(path, "rlax_rainbow_" + fname_part + "_parameters.pkl"), 'wb') as of:
                 pickle.dump(parameters, of)
             # with open(join_path(path, "rlax_rainbow_" + fname_part + "_experience.pkl"), 'wb') as of:
             #     pickle.dump(self.buffer.serializable(), of)
@@ -678,9 +678,10 @@ class DQNAgent:
 
     def restore_weights(self, online_weights_file, 
                         trg_weights_file, 
-                        opt_state_file=None, 
-                        experience_file=None,
-                        parameter_file=None):
+                        opt_state_file=None,
+                        parameter_file=None, 
+                        experience_file=None
+                        ):
         """Restore online and target network weights from the specified files
         added: load optimizer state if file name given"""
         with open(online_weights_file, 'rb') as iwf:
