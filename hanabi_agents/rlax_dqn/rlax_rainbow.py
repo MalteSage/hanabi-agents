@@ -649,7 +649,7 @@ class DQNAgent:
     def __repr__(self):
         return f"<rlax_dqn.DQNAgent(params={self.params})>"
     
-    def save_weights(self, path, fname_part, only_weights=True, epochs_alive):
+    def save_weights(self, path, fname_part, only_weights=True, epochs_alive=None):
         """Save online and target network weights to the specified path
         added: save optimizer state"""
         
