@@ -701,8 +701,8 @@ class DQNAgent:
         if parameter_file is not None:
             with open(parameter_file, 'rb') as iwf:
                 parameters = pickle.load(iwf)
-                self.buffersize = paramters['buffersize']
-                self.alpha = paramters['alpha']
+                self.buffersize = parameters['buffersize']
+                self.alpha = parameters['alpha']
                 self.lr = parameters['lr']
                 for i, size in enumerate(self.buffersize):
                     self.buffer[i].change_buffersize(size)
