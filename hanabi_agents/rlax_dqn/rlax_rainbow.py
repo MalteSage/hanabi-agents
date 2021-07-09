@@ -699,7 +699,7 @@ class DQNAgent:
                 self.buffer.load(pickle.load(iwf))
         epoch_alive = None
         if parameter_file is not None:
-            with open(paremter_file, 'rb') as iwf:
+            with open(parameter_file, 'rb') as iwf:
                 parameters = pickle.load(iwf)
                 self.buffersize = paramters['buffersize']
                 self.alpha = paramters['alpha']
